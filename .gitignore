@@ -1,0 +1,12 @@
+# 本仓库只有脚本与文档，仅排除本地/编辑器产物
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+Thumbs.db
+*.log
+
+# 本机安装位置（由 install-shortcut.ps1 在用户机器上生成，不进仓库）
+Codex-launcher/
