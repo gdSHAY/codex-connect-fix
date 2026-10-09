@@ -1,11 +1,11 @@
 <div align="center">
 
-<h1>Codex 连接修复 · 按应用代理启动器</h1>
+<h1>Codex 连接修复</h1>
 
-<b>Windows · Codex Desktop（微软商店版）</b> · <code>连不上 · 反复重连 · 商店更新后失效</code>
+<b>Windows · Codex Desktop（微软商店版）</b> · <code>反复重连 5 次 · 远程控制 remote 失败</code>
 <b>简体中文</b> | <a href="./README.en.md">English</a>
 
-只给 Codex 自己注入代理 · 不改系统环境变量 · 商店更新后不会失效<br>
+不开 TUN 模式，只给 Codex 挂代理 —— 微信、浏览器照常直连<br>
 
 <a href="https://github.com/gdSHAY/codex-connect-fix/stargazers"><img src="https://img.shields.io/github/stars/gdSHAY/codex-connect-fix?style=flat-square&label=Stars&color=06d6a0" alt="Stars"></a>
 <a href="https://github.com/gdSHAY/codex-connect-fix/forks"><img src="https://img.shields.io/github/forks/gdSHAY/codex-connect-fix?style=flat-square&label=Forks&color=4cc9f0" alt="Forks"></a>
@@ -21,282 +21,220 @@
 
 <br><br>
 
-<a href="./scripts/install-shortcut.ps1">一键安装脚本</a> · <a href="./scripts/start-codex-proxy.ps1">可审计的核心逻辑</a> · <a href="./scripts/start-codex-proxy.cmd">手动入口</a>
+<a href="./AGENT_PROMPTS.md">🤖 部署提示词：让 Agent 一键搞定</a> · <a href="./scripts/install-shortcut.ps1">方案 A 启动器</a> · <a href="./scripts/set-user-proxy.ps1">方案 B 用户级变量</a>
 
 </div>
 
 ---
 
-**这个仓库解决一个很具体的问题：微软商店版 Codex 桌面版连不上服务器、一直转圈或反复重连，而你的本机代理明明开着。** 原因是 Codex 进程没有拿到代理环境变量 —— 系统代理对它的部分子进程不生效。本工具用一个「按应用启动器」把 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 注入到**从它启动的那棵 Codex 进程树**里，其余进程一概不受影响。
+**Codex 每发一条指令，都要雷打不动地重连 5 次才开始思考**（见下图），手机远程连电脑也失败。根因不是网速差，而是 **Codex 的部分子进程压根没用上系统代理**。本项目给两种零副作用的修法：一个只给 Codex 用的启动脚本，或一组用户级代理环境变量。**两种都不用开代理软件的 TUN 模式**，微信、浏览器等其它软件照常直连。
 
-它顺带修掉了原始版本的一个硬伤：启动器里写死的商店包目录带版本号（`OpenAI.Codex_26.908.4834.0_x64__...`），商店一自动更新目录名就变，快捷方式直接报「找不到文件」。本版改为运行时用 `Get-AppxPackage` 解析当前版本，**商店更新后不需要再改任何东西**。
+> ⚠️ 需要你**自备**本地 HTTP 代理（Clash / FlClash / Mihomo，默认 7890）—— 本项目不含代理。
+> ⚠️ 改完必须**完全退出 Codex 再重启**，已经在跑的进程不会回头读环境变量。
 
-> ⚠️ **本工具不含代理，你必须有现成的本地 HTTP 代理**（Clash / FlClash / Mihomo 等，默认端口 `7890`）。
-> ⚠️ **启动前必须先把 Codex 完全退出**，否则环境变量注入不进已经在跑的进程树。
-> 详见 [前提条件与能力边界](#-前提条件与能力边界重要)。
+## 🤖 直接把这段发给 Agent
 
-## 🎬 它长什么样
-
-本项目没有图形界面 —— 它就是一个会启动 Codex 的快捷方式，所以这里唯一能拍给你的「界面」是 Codex 官方图标，以及启动器在体检模式下的**真实输出**。
-
-<img src="./docs/codex-app-icon.png" alt="Codex 官方图标" width="128">
-
-<sub>① 图标直接从 Codex 安装包里提取（`app\resources\icon-chatgpt.ico`，含 16~256 八种尺寸），不是设计稿也不是占位图。安装脚本会把它复制到本地，这样商店更新换了目录，快捷方式的图标也不会变白纸。</sub>
-
-启动器带一个只体检、不启动的模式，它会把「解析到了哪个版本、代理端口通不通、变量注没注进去」全部打出来。下面这段是本机实测输出，一字未改：
+复制下面整段，发给一个有**本机 PowerShell 权限**的 Agent（Claude Code / WorkBuddy / Codex 本身都行）。它会先只读取证、再动手，最后把体检输出贴给你，而不是只说一句「已完成」。
 
 ```text
-=== Codex 代理启动器 · 体检 ===
-安装版本 : 26.928.3736.0
-安装目录 : C:\Program Files\WindowsApps\OpenAI.Codex_26.928.3736.0_x64__2p2nqsd0c76g0
-主程序   : C:\Program Files\WindowsApps\OpenAI.Codex_26.928.3736.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe
-代理地址 : http://127.0.0.1:7890
-代理端口 : 7890 正在监听（PID 12344）
-已注入   : HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY
-隐含变量 : NO_PROXY=localhost,127.0.0.1,::1
+帮我修 Windows 上「Codex 反复重连 / 手机远程连接失败」的问题。
+根因已确认：Codex 的部分子进程没继承系统代理。修法是启动 Codex 前先设好代理环境变量。
 
-体检模式：未启动 Codex。
+1) 先只读：Get-AppxPackage -Name OpenAI.Codex 拿到 InstallLocation 与 Version
+   （目录名带版本号，绝不写死）；用 Get-NetTCPConnection -State Listen -LocalPort 7890
+   确认代理在监听 —— 没监听就停下来告诉我先开代理软件。
+2) 方案 A（必做）：把 scripts/ 下 4 个文件放到 %APPDATA%\Codex-launcher\，然后运行
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-shortcut.ps1
+   硬约束：.cmd / .vbs 里不能有任何非 ASCII 字符（cmd 按 OEM 代码页解析会串行）。
+3) 方案 B（只在我要用远程连接时做）：运行 scripts/set-user-proxy.ps1，
+   写入用户级 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 与 NO_PROXY。用 'User' 不用 'Machine'，
+   不要用 setx。
+4) 验收：跑 start-codex-proxy.cmd --check，把完整输出贴给我；并明确告知
+   Codex 必须完全退出后重启才生效。
+
+禁止：开 TUN 模式；改 Codex 安装文件；改系统级(Machine)环境变量。任何一步失败就停下报错。
 ```
 
-<sub>② 这一屏同时验证了三件事：版本无关解析成立（目录名里带着当前真实版本号）、代理端口确实是通的、四个环境变量在启动 Codex 之前就已经在这个进程里。任何一项不对都会当场写出来，而不是让你对着「连不上」猜。</sub>
+完整版（含分步验收要求）与英文版见 [`AGENT_PROMPTS.md`](./AGENT_PROMPTS.md)。
+
+## 1️⃣ 能解决什么问题
+
+| 你遇到的症状 | 能解决 | 用哪个方案 |
+| --- | --- | --- |
+| Codex 每发一条指令都要重连 5 次才响应 | ✅ | A |
+| Codex 一直转圈、提示 request timed out | ✅ | A |
+| **手机远程连接电脑、Codex 远程（remote）失败** | ✅ | **B** |
+| Codex 控制浏览器 / 调用联网子进程失败 | ✅ | A（B 更保险） |
+| 开 TUN 模式后微信卡死、国内网站变慢 | ✅ 且不用开 TUN | A + B |
+| 商店更新后旧启动脚本报「找不到文件」 | ✅ | 本项目不写死版本号 |
+| 你根本没有本地代理 | ❌ | —— |
+
+<div align="center">
+<img src="./docs/symptom-reconnect-5times.jpg" width="821" alt="Codex 正在重新连接 5/5，request timed out">
+<br>
+<sub>图 1：修之前的样子 —— 每条指令都卡在「正在重新连接 5/5 / request timed out」。</sub>
+</div>
+
+## 2️⃣ 使用的方法
+
+### 方案 A：专用启动脚本（推荐，影响面最小）
+
+在启动 Codex **之前**，把 3 个代理变量设进当前进程，再启动 Codex —— 它和它拉起的子进程就都带上代理了，其它软件完全不受影响。
+
+```bat
+@echo off
+set "HTTP_PROXY=http://127.0.0.1:7890"
+set "HTTPS_PROXY=http://127.0.0.1:7890"
+set "ALL_PROXY=http://127.0.0.1:7890"
+set "NO_PROXY=localhost,127.0.0.1,::1"
+start "" "C:\Program Files\WindowsApps\OpenAI.Codex_26.908.4834.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"
+```
+
+<div align="center">
+<img src="./docs/method-a-launcher-cmd.png" width="737" alt="专用启动脚本截图">
+<br>
+<sub>图 2：这就是全部内容，短到可以手抄。⚠️ 但注意最后一行 —— 路径里的 <code>26.908.4834.0</code> 是<strong>写死</strong>的，商店一更新目录名就变（实测已变成 <code>26.928.3736.0</code>），双击必然报「找不到文件」。本项目改为运行时用 <code>Get-AppxPackage</code> 解析，商店更新后再也不用改。</sub>
+</div>
+
+一键安装（自动处理版本解析、隐藏黑窗、桌面官方图标）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-shortcut.ps1
+```
+
+### 方案 B：用户级代理环境变量（解决远程 / 后台进程）
+
+**为什么还需要 B**：手机远程连接、Codex 的 remote 能力，用的是 Codex 的**后台进程**。后台进程不是从方案 A 的脚本拉起的，继承不到那份进程级变量 —— 只有把变量设到用户级才能覆盖它。
+
+<div align="center">
+<img src="./docs/method-b-user-env.png" width="757" alt="用户级环境变量截图">
+<br>
+<sub>图 3：用户级环境变量。关键在于第三个参数 <code>'User'</code> —— 写进当前用户（注册表 HKCU\Environment），不需要管理员；不要用 <code>'Machine'</code>，也不要为了省事用 <code>setx</code>（有 1024 字符截断、超长时静默失败）。</sub>
+</div>
+
+```powershell
+# 设置
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\set-user-proxy.ps1
+# 查看当前状态
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\set-user-proxy.ps1 -Status
+# 一键撤销
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\set-user-proxy.ps1 -Undo
+```
+
+> ⚠️ **B 是有代价的**：用户级变量会被你**所有新启动的进程**继承，git / pip / curl 这类命令行工具会开始走代理，个别软件可能因此变慢或失败。所以默认用 A，只在确实需要远程能力时再加 B；不需要了就 `-Undo`。
+
+### 两个方案怎么选
+
+| | 方案 A 专用启动器 | 方案 B 用户级变量 |
+| --- | --- | --- |
+| 影响范围 | 只有从它启动的 Codex 进程树 | 当前用户下所有新进程 |
+| 能修远程 / 后台进程 | ❌ | ✅ |
+| 会不会影响微信等 | 完全不影响 | ⚠️ 会继承，可能变慢 |
+| 需要管理员 | ❌ | ❌ |
+| 适合谁 | 只想让 Codex 走代理 | 要用远程控制、或不想记着从哪里启动 |
+
+**两个方案可以同时用，互不冲突。**
+
+## 3️⃣ 原理与优势
+
+### 为什么开 TUN 模式能修，却没人愿意常开
+
+TUN 模式把**全部流量**强制接管进代理隧道，于是微信、国内网站、内网服务全被塞进代理链路 —— 结果是卡死、断线、DNS 变慢。为了修一个 Codex 而牺牲整台机器的上网体验，代价太大，而这个问题根本不需要全局接管。
+
+### 为什么「设个环境变量」就够了
+
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 是程序读取代理的事实标准。进程在**创建时**读一次环境变量，**子进程继承父进程的环境** —— 所以只要在启动 Codex 之前把变量设好，Codex 以及它后续拉起的浏览器控制、联网子进程就都会走代理。再配上 `NO_PROXY=localhost,127.0.0.1,::1`，本机回环保持直连，Codex 与本地 helper 的通信不会被绕进代理。
+
+### 那为什么不干脆直接改系统变量？
+
+因为系统级 / 用户级变量会被**所有**新进程继承 —— 你只想修 Codex，却顺带把其它软件也拽进了代理。方案 A 用 `setlocal` 把变量限制在本次 cmd 及其子进程内，**cmd 退出即消失**，是影响面最小的做法。方案 B 之所以存在，仅仅是为了覆盖「不从启动器拉起的后台进程」这一种情况，代价也随之而来 —— 所以它可选、可撤销。
+
+### 实测记录：为什么必须运行时解析版本
+
+| 项目 | 值 |
+| --- | --- |
+| 旧启动脚本写死的商店包目录 | `OpenAI.Codex_26.908.4834.0_x64__2p2nqsd0c76g0` |
+| 本次核对时的实际商店包目录 | `OpenAI.Codex_26.928.3736.0_x64__2p2nqsd0c76g0` |
+| 结论 | 目录名确实随更新变化，写死的脚本必然失效 |
 
 ## 📥 下载与安装
 
-到 [**Releases**](../../releases/latest) 页面下载。
-
-| 文件 | 大小 | 说明 |
-| --- | --- | --- |
-| `codex-connect-fix-v1.0.0.zip` | 约 99 KB | 4 个脚本 + 双语说明 + 官方图标，解压即用 |
-| [`scripts/install-shortcut.ps1`](./scripts/install-shortcut.ps1) | 5.5 KB | 一键安装：复制文件、提取图标、建桌面快捷方式 |
-| [`scripts/start-codex-proxy.ps1`](./scripts/start-codex-proxy.ps1) | 4.7 KB | 核心逻辑，解析版本 / 体检 / 启动 |
-| [`scripts/start-codex-proxy.cmd`](./scripts/start-codex-proxy.cmd) | 2.0 KB | 手动入口，负责设好代理变量再调用上面那个 |
-| [`scripts/run-codex-hidden.vbs`](./scripts/run-codex-hidden.vbs) | 1.7 KB | 隐藏黑窗的包装器，快捷方式指向它 |
-
-**依赖：无。** 用的是 Windows 自带的 PowerShell 5.1 与 Windows Script Host，不需要装任何东西。
-
-### 安装（推荐：一键）
-
-1. 解压压缩包到任意目录（例如 `D:\CodexLauncher`）
-2. 在该目录按住 `Shift` 右键 →「在此处打开 PowerShell 窗口」，执行：
+到 [**Releases**](../../releases/latest) 下载 `codex-connect-fix-v1.0.1.zip`，解压后执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-shortcut.ps1
 ```
 
-3. 桌面上会出现「启动 Codex 代理」快捷方式
+**依赖：无** —— 只用 Windows 自带的 PowerShell 5.1 与 Windows Script Host。
+`-ExecutionPolicy Bypass` 不能省：本机执行策略默认为 `Restricted`，不加会被拒绝运行。
 
-> ⚠️ `-ExecutionPolicy Bypass` 不能省 —— 本机实测执行策略默认是 `Restricted`，直接 `& .\install-shortcut.ps1` 会报「在此系统上禁止运行脚本」。`start-codex-proxy.cmd` 内部已经自带了这个参数，所以只有安装这一步需要你手动带上。
+## ⚠️ 能力边界
 
-> ⚠️ 杀软或 SmartScreen 可能对 `.vbs` 提示 —— 它唯一的作用是把 cmd 的黑窗隐藏掉（`WScript.Shell.Run` 的窗口样式设 0）。不放心可以直接用 `start-codex-proxy.cmd`，代价是每次双击会闪一下黑窗。
-
-### 免安装（直接在原地用）
-
-不解压也行，双击 `scripts/start-codex-proxy.cmd` 即可；只是每次会闪一个黑窗，也没有桌面图标。
-
-### 从源码开始
-
-```powershell
-git clone https://github.com/gdSHAY/codex-connect-fix.git
-cd codex-connect-fix
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-shortcut.ps1
-```
-
-### 卸载
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-shortcut.ps1 -Uninstall
-```
-
-只会删掉 `%APPDATA%\Codex-launcher\` 和桌面快捷方式，不动 Codex 本身，也不动任何系统设置。
-
-## ✨ 症状对照表
-
-先对照症状，不要盲目装。**「能不能解决」这一列是本工具的真实边界**：
-
-| 你遇到的情况 | 能解决吗 | 为什么 |
-| --- | --- | --- |
-| Codex 一直转圈、提示网络错误，但浏览器能上外网 | ✅ | 典型表现：Codex 进程没拿到代理变量 |
-| Codex 反复重连、远程 / 联网能力不可用 | ✅ | 同上 —— 本工具做的是让进程树带上代理 |
-| 商店更新后，原来的启动快捷方式双击报「找不到文件」 | ✅ | 原版把带版本号的目录写死在脚本里，本版运行时解析 |
-| 每次启动都闪一下黑窗，看着像报错 | ✅ | `.vbs` 包装器把窗口样式设为隐藏 |
-| 快捷方式图标变成白纸 | ✅ | 图标复制到本地，不指向会被更新的安装目录 |
-| 你根本没有本地代理（没开 Clash 之类的） | ❌ | 本工具**不含代理**，它只是把地址告诉 Codex |
-| Codex 已经在运行，你才双击快捷方式 | ❌ | 环境变量不会注入到已存在的进程树，必须先完全退出 |
-| 用的是自己装的 Codex CLI（非商店版） | ❌ | 本工具只处理包名为 `OpenAI.Codex` 的商店应用 |
-| 你把代理换成了非 HTTP 协议（如 SOCKS-only） | ❌ | 注入的是 `http://` 形式的环境变量 |
-
-## ⚙️ 三步开始用
-
-1. **先启动代理**：打开 Clash / FlClash，确认本地 HTTP 端口在监听（默认 `7890`）
-2. **安装一次**：跑上面的 `install-shortcut.ps1`
-3. **以后每次**：双击桌面「启动 Codex 代理」，Codex 起来就能连
-
-**支持的调用方式**
-
-| 方式 | 命令 | 用途 |
-| --- | --- | --- |
-| 桌面快捷方式 | 双击 | 日常使用，静默启动 |
-| 体检模式 | `start-codex-proxy.cmd --check` | 连不上时先跑这个，它会告诉你卡在哪一步 |
-| 直接跑核心逻辑 | `start-codex-proxy.ps1 -Check` | 同上，控制台输出，便于贴给别人看 |
-
-## ⚠️ 前提条件与能力边界（重要）
-
-> 这一节是本仓库最值得读的部分。它明确写出**做不到什么**，比列举功能更能说明它到底是什么。
-
-### 1. 你必须自备本地代理
-
-本工具只做一件事：把一个已经存在的本地代理地址写进 Codex 进程的环境变量。它**不提供**代理、不内置任何节点、不修改任何系统的代理设置。
-
-代理没在监听时，启动器会直接弹窗告诉你（而不是静默启动一个注定连不上的 Codex）：
-
-```text
-本地代理 http://127.0.0.1:7890 没有在监听。
-
-请先启动 Clash / FlClash 并确认端口 7890 已开启，再启动 Codex。
-```
-
-### 2. 必须先完全退出 Codex
-
-环境变量是**进程创建时继承**的，一个已经在跑的进程不会因为你双击了快捷方式就改掉自己的环境。所以正确顺序永远是：**完全退出 Codex → 双击快捷方式**。
-
-体检输出里专门留了 `已注入` 一行，就是让你在启动前确认这件事。
-
-### 3. 只影响这一棵进程树，不碰系统环境
-
-启动器在 cmd 里用 `setlocal` 设变量，只对本次子进程有效，退出即消失。不写注册表、不调 `setx`、不改「Internet 选项」里的系统代理。因此：
-
-- 不影响浏览器、不影响其它任何软件；
-- 关掉启动器的窗口（或它自己退出）后，系统环境里查不到这些变量。
-
-### 4. 商店包版本目录会变 —— 这是本仓库存在的主要原因
-
-原始版本的启动器把路径写死成带版本号的目录：
-
-```text
-C:\Program Files\WindowsApps\OpenAI.Codex_26.908.4834.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe
-```
-
-**实测记录（2026-10）**：写死时的版本是 `26.908.4834.0`，到本次核对时已变成 `26.928.3736.0` —— 目录名确实换了，原来那个写死的启动方式在商店更新后必然报「找不到文件」，而用户往往不知道是自己脚本过期了。
-
-本版改为运行时解析：
-
-```powershell
-$pkg = Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -First 1
-$exe = Join-Path $pkg.InstallLocation 'app\ChatGPT.exe'
-```
-
-并且加了一层兜底：万一将来商店包内部结构再变、app\ChatGPT.exe 不在了，会在安装目录里递归搜同名可执行文件；再找不到就弹窗并把安装目录打出来，方便提 Issue。
-
-### 5. 代理端口不是 7890 时，改一行
-
-`start-codex-proxy.cmd` 里只有一行需要改：
-
-```bat
-if not defined CODEX_PROXY set "CODEX_PROXY=http://127.0.0.1:7890"
-```
-
-也可以不改文件，直接在启动前设好环境变量 `CODEX_PROXY`（例如 `set CODEX_PROXY=http://127.0.0.1:1080`），脚本会优先用它。
-
-### 6. 为什么 `.cmd` 和 `.vbs` 里是英文注释
-
-不是为了装样子，是一个踩过的坑：**cmd.exe 用 OEM 代码页（简体中文系统是 936）解析 `.cmd` 文件**。文件里若含 UTF-8 中文，某些字节序列会把后面的回车符（`CR`）当成双字节字符的第二个字节吃掉，导致**两行被拼成一行**、脚本报出莫名其妙的「不是内部或外部命令」。实测就是这么坏的。
-
-所以：`.cmd` / `.vbs` 全 ASCII，所有中文提示统一放在 `.ps1` 里，而 `.ps1` 存为 **UTF-8 with BOM**（PowerShell 5.1 只有看到 BOM 才按 UTF-8 读，否则按 ANSI 读，中文会变乱码）。
-
-### 7. 实测澄清（2026-10）
-
-| 流传的说法 | 实测结果 |
-| --- | --- |
-| 「把系统代理一开，Codex 就自动走代理了」 | **不成立**。本机系统代理确实开着，但没有注入变量时 Codex 依然连不上，这正是本仓库的起点。 |
-| 「商店应用没法通过环境变量控制」 | **不成立**。进程树的继承关系对商店应用一样有效，实测主进程与子进程都拿到了 `HTTPS_PROXY`。 |
-| 「直接双击 .ps1 就能用」 | **看执行策略**。本机默认为 `Restricted`，不加 `-ExecutionPolicy Bypass` 会被拒绝执行。 |
-
-## 🧱 技术栈
-
-| | |
-| --- | --- |
-| 脚本语言 | Windows 批处理（cmd）+ PowerShell 5.1 + VBScript |
-| 系统依赖 | 全部来自 Windows 10 / 11 自带组件，**无需安装任何第三方库** |
-| 关键 API | `Get-AppxPackage`（解析商店包）、`Start-Process`（继承环境变量启动）、`Get-NetTCPConnection`（探端口）、`WScript.Shell.Run`（隐藏窗口） |
-| 分发 | 单个 zip 走 GitHub Releases；二进制与图标不进 git 对象库 |
-| 无 | 没有安装程序、没有服务、没有常驻进程、没有配置文件 |
+- **不含代理**：本项目只把地址告诉 Codex，代理本身要你自己开（默认端口 7890，改一行即可）。
+- **必须先完全退出 Codex**：环境变量只在进程创建时生效，已在运行的进程改不动。
+- **不改 Codex 任何文件**：方案 A 不写注册表；方案 B 只写 `HKCU\Environment` 一个位置，且可一键撤销。不动系统代理设置。
+- **只支持商店版**：包名必须是 `OpenAI.Codex`；自己装的 Codex CLI 不适用。
+- **只认 HTTP 形式**：注入的是 `http://` 变量，纯 SOCKS 端口需要在代理软件里开 HTTP 混合端口。
+- **方案 B 是双刃剑**：见上文代价说明，随时可 `-Undo`。
 
 ## 🗂 项目结构
 
 ```text
-scripts/install-shortcut.ps1    一键安装：复制文件 / 提取官方图标 / 建快捷方式（支持 -Uninstall）
-scripts/start-codex-proxy.cmd   手动入口：设好 4 个代理变量，再调用下面的核心逻辑
-scripts/start-codex-proxy.ps1   核心逻辑：解析当前商店版本 -> 体检 -> 启动 Codex
-scripts/run-codex-hidden.vbs    隐藏黑窗的包装器，快捷方式指向它
-docs/codex-app-icon.png         README 用的官方图标（从安装包提取）
+AGENT_PROMPTS.md                   中英双语「部署提示词」，直接发给 Agent 用
+scripts/install-shortcut.ps1       方案 A 一键安装：复制文件 / 提取官方图标 / 建快捷方式（-Uninstall 卸载）
+scripts/start-codex-proxy.cmd      方案 A 入口：设好 4 个变量，再调用下面的核心逻辑
+scripts/start-codex-proxy.ps1      方案 A 核心：解析商店版本 -> 体检 -> 启动（--check 只体检）
+scripts/run-codex-hidden.vbs       隐藏黑窗的包装器
+scripts/set-user-proxy.ps1         方案 B：写用户级变量（-Status 查看 / -Undo 撤销）
+docs/symptom-reconnect-5times.jpg  图 1 故障现场
+docs/method-a-launcher-cmd.png     图 2 方案 A 启动脚本
+docs/method-b-user-env.png         图 3 方案 B 用户级变量
 ```
 
 ## ❓ 常见问题
 
 <details>
-<summary><b>双击快捷方式后什么都没发生，Codex 没起来</b></summary>
+<summary><b>照着做了还是重连，怎么办？</b></summary>
 
-先跑体检模式，它会直接告诉你卡在哪：
-
-```powershell
-%APPDATA%\Codex-launcher\start-codex-proxy.cmd --check
-```
-
-三种最常见的输出与含义：`没有找到微软商店版 Codex` → 没装或包名变了；`代理端口 : 7890 未监听` → 代理没开；`主程序 : ... 找不到 ChatGPT.exe` → 商店包内部结构变了，请提 Issue 并附上打印出来的安装目录。
+按顺序排三件事：① Codex 是不是**完全退出**后才重启的（含托盘图标）；② 代理端口是否真的在监听 —— 跑 `start-codex-proxy.cmd --check` 看 `代理端口` 那一行；③ 是否只做了方案 A，而你的场景（远程 / 后台进程）需要方案 B。
 </details>
 
 <details>
-<summary><b>Codex 起来了，但提示网络错误 / 一直转圈</b></summary>
+<summary><b>双击后提示「找不到文件」是怎么回事？</b></summary>
 
-按顺序排三件事：
-
-1. **Codex 是不是先于快捷方式就在跑了？** 那就先完全退出（含托盘图标）再双击快捷方式；
-2. **代理是不是只开了系统代理、没开允许局域网 / 没监听 127.0.0.1？** 用体检输出里的 `代理端口` 一行确认，它显示的是真实监听状态；
-3. **代理是不是只支持 SOCKS？** 本工具注入的是 `http://` 形式的变量，纯 SOCKS 端口需要你在代理软件里打开 HTTP 混合端口。
+你用的还是把版本号写死的旧脚本。用本项目的 `install-shortcut.ps1` 重装一次即可，它会在运行时解析当前商店版本。
 </details>
 
 <details>
-<summary><b>商店更新 Codex 之后，需要重装这个启动器吗？</b></summary>
+<summary><b>设了方案 B 之后 git / pip 变慢或报错</b></summary>
 
-不需要重装，但要**重新执行一次安装脚本**，目的是把新版安装包里的官方图标重新提取一份（否则图标不会更新，功能不受影响）。启动逻辑本身是版本无关的，不用管。
+属于预期内 —— 用户级变量会被所有新进程继承。要么给该工具单独设置 `NO_PROXY`，要么直接撤销：`set-user-proxy.ps1 -Undo`。
 </details>
 
 <details>
-<summary><b>我改了代理端口，要改几个地方？</b></summary>
+<summary><b>这个项目会动我的 Codex 或系统吗？</b></summary>
 
-只改一处：`%APPDATA%\Codex-launcher\start-codex-proxy.cmd` 里的 `CODEX_PROXY` 那一行。体检模式与启动都读同一个变量，改完直接生效。注意仓库里那份副本也建议一起改，否则下次重跑安装脚本会把旧值覆盖回来。
-</details>
-
-<details>
-<summary><b>这个启动器会修改 Codex 的安装文件吗？</b></summary>
-
-不会。它只做三件事：读注册清单拿到安装目录、在自己的进程里设 4 个环境变量、用 `Start-Process` 启动 Codex 主程序。**不写 Codex 的任何文件、不写注册表、不改系统代理设置。**
+不会。方案 A 只在自己进程内设变量，然后用 `Start-Process` 拉起 Codex；方案 B 只写 `HKCU\Environment` 一个位置且可一键撤销。**不修改 Codex 任何文件、不改系统级变量、不改系统代理设置。**
 </details>
 
 ## 📄 合规与免责
 
-- 本仓库与 OpenAI **无任何关联**，非官方项目。Codex、ChatGPT 及相关图标是 OpenAI 的商标与著作权财产；本仓库提取图标仅用于在快捷方式与文档中**识别该程序**，不作任何其它用途。
-- 本工具**不修改 Codex 程序本体**，不绕过任何付费、鉴权或地区限制；它只在本机为进程注入代理环境变量 —— 代理从哪来、能不能用，完全取决于你自己。
-- 请在使用前自行确认：你的网络环境、所使用代理服务的行为符合当地法律法规，以及符合 OpenAI 的服务条款。
+- 本仓库与 OpenAI **无任何关联**，非官方项目。Codex、ChatGPT 及相关图标是 OpenAI 的商标与著作权财产。
+- 本工具**不修改 Codex 程序本体**，不绕过任何付费、鉴权或地区限制；只在本机为进程设置代理环境变量 —— 代理从哪来、能不能用，完全取决于你自己。
+- 请自行确认你的网络环境与所用代理服务符合当地法律法规及 OpenAI 服务条款。
 - 脚本按「现状」提供，不附带任何担保。因使用本工具造成的网络配置变化、账号风险或其它后果，**由使用者自行承担**。
 
 ## 📮 联系
 
 | | |
 | --- | --- |
-| 问题反馈 | [Issues](https://github.com/gdSHAY/codex-connect-fix/issues)（请附上 `--check` 的完整输出） |
+| 问题反馈 | [Issues](https://github.com/gdSHAY/codex-connect-fix/issues)（请附 `--check` 的完整输出） |
 | 仓库 | <https://github.com/gdSHAY/codex-connect-fix> |
 | 相关项目 | [codex-sandbox-doctor](https://github.com/gdSHAY/codex-sandbox-doctor)：修复 Codex 沙箱「Windows 设置未完成」 |
 
-## ⭐ Star 历史
-
-<a href="https://star-history.com/#gdSHAY/codex-connect-fix&Timeline">
-  <img src="https://api.star-history.com/svg?repos=gdSHAY/codex-connect-fix&type=Timeline" alt="Star History" width="620">
-</a>
-
 ## 📄 许可
 
-本仓库采用 **MIT License**，见 [LICENSE](./LICENSE)。你可以自由使用、修改与再分发；发行版（Releases 里的压缩包）与源码适用同一许可。
+**MIT License**，见 [LICENSE](./LICENSE)。
 
 <div align="center">
 <sub>本 README 采用「<b>简体中文</b> / <a href="./README.en.md">English</a>」双语，可用顶部链接切换。</sub>
